@@ -14,11 +14,11 @@ on:
         type: boolean
         default: false
   schedule:
-    # GitHub cron is UTC. 09:45 New York is 13:45 UTC during EDT
-    # and 14:45 UTC during EST. Run every day because crypto trades 24/7.
+    # cron 09:45 and 10:45 New York time.
+    # Run every day because crypto trades 24/7.
     # The Python timezone gate below allows only the correct trigger.
-    - cron: "45 13 * * *"
-    - cron: "45 14 * * *"
+    - cron: "45 9 * * *"
+    - cron: "45 10 * * *"
 
 permissions:
   contents: write
