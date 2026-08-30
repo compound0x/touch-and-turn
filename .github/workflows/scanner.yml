@@ -15,10 +15,10 @@ on:
         default: false
   schedule:
     # GitHub cron is UTC. 09:45 New York is 13:45 UTC during EDT
-    # and 14:45 UTC during EST. Both triggers are intentional; the
-    # Python timezone gate below allows only the correct one.
-    - cron: "45 13 * * 1-5"
-    - cron: "45 14 * * 1-5"
+    # and 14:45 UTC during EST. Run every day because crypto trades 24/7.
+    # The Python timezone gate below allows only the correct trigger.
+    - cron: "45 13 * * *"
+    - cron: "45 14 * * *"
 
 permissions:
   contents: write
@@ -95,7 +95,7 @@ jobs:
           ls -lah index.html
 
       - name: Persist notification state
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_notification) && hashFiles('alert_state.json') != '' }}
+        if: ${{ !(github.event_name == 'schedule' && success()) && !(github.event_name == 'workflow_dispatch' && inputs.test_notification) && hashFiles('alert_state.json') != '' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
