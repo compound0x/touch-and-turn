@@ -1,0 +1,102 @@
+name: Touch & Turn Scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_now:
+        description: "Run the scanner now (useful for testing/replay)"
+        required: false
+        type: boolean
+        default: true
+      test_notification:
+        description: "Send a Telegram test alert only"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # GitHub cron is UTC. 09:45 New York is 13:45 UTC during EDT and 14:45 UTC during EST.
+    # Run every 15 minutes around both possible offsets; the Python gate sends alerts only
+    # when today's 09:45 NY candle is available and the scan has passed the strategy test.
+    - cron: "45,00 13,14 * * 1-5"
+    - cron: "15,30 13,14 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: touch-and-turn-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Test Telegram notification
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_notification }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from urllib.request import Request, urlopen
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+          chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+          if not token or not chat:
+              raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured.")
+          msg = "🧪 TOUCH & TURN SCANNER TEST\n\nTelegram connection is working.\n\nDashboard: https://compound0x.github.io/touch-and-turn/"
+          req = Request(f"https://api.telegram.org/bot{token}/sendMessage", data=json.dumps({"chat_id": chat, "text": msg}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+          with urlopen(req, timeout=15) as r:
+              print(f"Telegram: HTTP {r.status}")
+          PY
+
+      - name: Run scanner
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_notification) }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify_signals.py
+
+      - name: Verify dashboard
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_notification) }}
+        run: |
+          test -s index.html
+          ls -lah index.html
+
+      - name: Persist notification state
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_notification) && hashFiles('alert_state.json') != '' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add alert_state.json
+          if git diff --cached --quiet; then
+            echo "No notification state changes."
+          else
+            git commit -m "Persist Touch & Turn alert state"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+
+      - name: Deploy dashboard to GitHub Pages
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_notification) }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: .
+          keep_files: true
+          force_orphan: true
